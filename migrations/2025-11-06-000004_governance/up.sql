@@ -14,6 +14,13 @@ CREATE TABLE IF NOT EXISTS governance_proposals (
     end_timestamp TIMESTAMPTZ,
     quorum NUMERIC(39, 4),
     payload JSONB,
+    total_votes NUMERIC(39, 0) DEFAULT 0,
+    yes_votes NUMERIC(39, 0) DEFAULT 0,
+    no_votes NUMERIC(39, 0) DEFAULT 0,
+    abstain_votes NUMERIC(39, 0) DEFAULT 0,
+    yes_votes_percentage NUMERIC(10, 4) DEFAULT 0,
+    no_votes_percentage NUMERIC(10, 4) DEFAULT 0,
+    abstain_votes_percentage NUMERIC(10, 4) DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
