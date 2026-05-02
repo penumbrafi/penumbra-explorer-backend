@@ -214,6 +214,7 @@ impl QueryRoot {
         resolve_trading_pair_liquidity(ctx, limit).await
     }
 
+    #[graphql(name = "tradingVolume24h")]
     async fn trading_volume_24h(
         &self,
         ctx: &async_graphql::Context<'_>,

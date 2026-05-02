@@ -226,7 +226,9 @@ pub struct TradingPairLiquidity {
 #[derive(Debug, Clone, SimpleObject)]
 pub struct TradingVolume24h {
     pub asset_id: String,
+    #[graphql(name = "volume24h")]
     pub volume_24h: String,
+    #[graphql(name = "swapCount24h")]
     pub swap_count_24h: i64,
     pub period_start: Option<DateTime>,
     pub period_end: Option<DateTime>,
