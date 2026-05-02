@@ -93,6 +93,14 @@ pub struct BlockParticipation {
     pub signed: bool,
 }
 
+#[derive(Debug, Clone, SimpleObject, FromRow)]
+pub struct VotingPowerHistoryEntry {
+    pub validator_identity_key: String,
+    pub voting_power: i64,
+    pub block_height: i64,
+    pub timestamp: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, SimpleObject)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ValidatorDetails {

@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::app_views::utils::block::Metadata as BlockMetadata;
 use crate::app_views::utils::transaction::Metadata as TransactionMetadata;
 use crate::app_views::utils::validator::ValidatorParams;
-use crate::app_views::utils::{block, dex, governance, ibc, transaction, validator};
+use crate::app_views::utils::{block, dex, governance, ibc, staking, transaction, validator};
 use crate::parsing::encode_to_base64;
 
 #[derive(Debug)]
@@ -1981,6 +1981,12 @@ CREATE TABLE IF NOT EXISTS ibc_transfers (
                 .unwrap_or_else(|| "unknown".to_string());
 
             let tx_bytes_base64 = encode_to_base64(tx_bytes);
+
+            let tx_view = &formatted_tx_json["transaction_view"];
+            let _ = staking::process_delegate_actions(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
+            let _ = staking::process_undelegate_actions(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
+            let _ = staking::mark_undelegate_claimed(dbtx, tx_view).await;
+            let _ = ibc::process_ibc_withdrawals(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
 
             let meta = TransactionMetadata {
                 tx_hash: *tx_hash,

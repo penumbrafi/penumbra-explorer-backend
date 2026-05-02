@@ -153,6 +153,17 @@ pub async fn resolve_transactions_collection(
             param_count += 1;
             where_clauses.push(format!("t.validator_identity_key = ${param_count}"));
         }
+
+        if let Some(status) = &filter.ibc_status {
+            param_count += 1;
+            if status == &crate::api::graphql::types::IbcStatusFilter::Unknown {
+                where_clauses.push(format!(
+                    "(t.ibc_status IS NULL OR t.ibc_status = ${param_count})"
+                ));
+            } else {
+                where_clauses.push(format!("t.ibc_status = ${param_count}"));
+            }
+        }
     }
 
     if !where_clauses.is_empty() {
@@ -173,6 +184,10 @@ pub async fn resolve_transactions_collection(
 
         if let Some(identity_key) = &validator_identity_key {
             count_query_builder = count_query_builder.bind(identity_key);
+        }
+
+        if let Some(ibc_status) = &filter.ibc_status {
+            count_query_builder = count_query_builder.bind(ibc_status.as_db_str());
         }
     }
 
@@ -223,6 +238,10 @@ pub async fn resolve_transactions_collection(
 
         if let Some(identity_key) = &validator_identity_key {
             query_builder = query_builder.bind(identity_key);
+        }
+
+        if let Some(ibc_status) = &filter.ibc_status {
+            query_builder = query_builder.bind(ibc_status.as_db_str());
         }
     }
 

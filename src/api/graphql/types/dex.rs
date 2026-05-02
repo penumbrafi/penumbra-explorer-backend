@@ -212,3 +212,40 @@ pub struct DexStats {
     pub total_executions: i64,
     pub open_positions: i64,
 }
+
+#[derive(Debug, Clone, SimpleObject)]
+pub struct TradingPairLiquidity {
+    pub trading_pair_asset1: String,
+    pub trading_pair_asset2: String,
+    pub active_positions: i64,
+    pub total_reserves1: String,
+    pub total_reserves2: String,
+    pub avg_fee_percentage: f64,
+}
+
+#[derive(Debug, Clone, SimpleObject)]
+pub struct TradingVolume24h {
+    pub asset_id: String,
+    pub volume_24h: String,
+    pub swap_count_24h: i64,
+    pub period_start: Option<DateTime>,
+    pub period_end: Option<DateTime>,
+}
+
+#[derive(Debug, Clone, SimpleObject)]
+pub struct RecentSwapPrice {
+    pub input_asset_id: String,
+    pub output_asset_id: String,
+    pub avg_price: f64,
+    pub swap_count: i64,
+    pub latest_swap: Option<DateTime>,
+}
+
+#[derive(Debug, Clone, SimpleObject)]
+pub struct SwapVolumeHistory {
+    pub date: String,
+    pub total_volume: String,
+    pub swap_count: i64,
+    pub arb_count: i64,
+    pub organic_count: i64,
+}

@@ -3,6 +3,7 @@ mod dex;
 mod governance;
 mod ibc;
 mod search;
+mod staking;
 mod stats;
 mod subscription;
 mod transaction;
@@ -12,17 +13,25 @@ use crate::api::graphql::types::inputs::TimePeriod;
 use async_graphql::Object;
 
 pub use block::{get as resolve_block, resolve_blocks_collection};
-pub use dex::{resolve_dex_stats, resolve_latest_executions, resolve_liquidity_positions};
+pub use dex::{
+    resolve_dex_stats, resolve_latest_executions, resolve_liquidity_positions,
+    resolve_recent_swap_prices, resolve_swap_volume_history, resolve_trading_pair_liquidity,
+    resolve_trading_volume_24h,
+};
 pub use governance::{
     resolve_active_proposals, resolve_governance_parameters, resolve_past_proposals,
     resolve_proposal_detail, resolve_vote_for_transaction,
 };
-pub use ibc::{resolve_ibc_stats, resolve_total_shielded_volume};
+pub use ibc::{resolve_ibc_flow_history, resolve_ibc_stats, resolve_total_shielded_volume};
 pub use search::resolve_search;
+pub use staking::{
+    resolve_pending_undelegations, resolve_undelegations_releasing_soon,
+    resolve_validator_delegates, resolve_validator_staking_stats, resolve_validator_undelegates,
+};
 pub use stats::resolve_stats;
 pub use subscription::Root as SubscriptionRoot;
 pub use transaction::{resolve_transaction, resolve_transactions_collection};
-pub use validator::{resolve_validator_details, resolve_validators_homepage};
+pub use validator::{resolve_validator_details, resolve_validator_voting_power_history, resolve_validators_homepage};
 
 pub struct QueryRoot;
 
@@ -129,6 +138,15 @@ impl QueryRoot {
         resolve_ibc_stats(ctx, client_id, time_period, limit, offset).await
     }
 
+    async fn ibc_flow_history(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        client_id: Option<String>,
+        days: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::ibc::IbcFlowHistory>> {
+        resolve_ibc_flow_history(ctx, client_id, days).await
+    }
+
     async fn ibc_total_shielded_volume(
         &self,
         ctx: &async_graphql::Context<'_>,
@@ -153,6 +171,17 @@ impl QueryRoot {
         resolve_validator_details(ctx, id).await
     }
 
+    async fn validator_voting_power_history(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        validator_id: String,
+        start_time: Option<chrono::DateTime<chrono::Utc>>,
+        end_time: Option<chrono::DateTime<chrono::Utc>>,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::validator::VotingPowerHistoryEntry>> {
+        resolve_validator_voting_power_history(ctx, validator_id, start_time, end_time, limit).await
+    }
+
     async fn liquidity_positions(
         &self,
         ctx: &async_graphql::Context<'_>,
@@ -175,6 +204,38 @@ impl QueryRoot {
         ctx: &async_graphql::Context<'_>,
     ) -> async_graphql::Result<crate::api::graphql::types::DexStats> {
         resolve_dex_stats(ctx).await
+    }
+
+    async fn trading_pair_liquidity(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::TradingPairLiquidity>> {
+        resolve_trading_pair_liquidity(ctx, limit).await
+    }
+
+    async fn trading_volume_24h(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::TradingVolume24h>> {
+        resolve_trading_volume_24h(ctx, limit).await
+    }
+
+    async fn recent_swap_prices(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::RecentSwapPrice>> {
+        resolve_recent_swap_prices(ctx, limit).await
+    }
+
+    async fn swap_volume_history(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        days: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::SwapVolumeHistory>> {
+        resolve_swap_volume_history(ctx, days).await
     }
 
     async fn governance_parameters(
@@ -214,5 +275,52 @@ impl QueryRoot {
         tx_hash: String,
     ) -> async_graphql::Result<Option<crate::api::graphql::types::VoteForTransaction>> {
         resolve_vote_for_transaction(ctx, tx_hash).await
+    }
+
+    async fn validator_delegates(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        validator_id: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::Delegate>> {
+        resolve_validator_delegates(ctx, validator_id, limit, offset).await
+    }
+
+    async fn validator_undelegates(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        validator_id: String,
+        limit: Option<i32>,
+        offset: Option<i32>,
+        pending_only: Option<bool>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::Undelegate>> {
+        resolve_validator_undelegates(ctx, validator_id, limit, offset, pending_only).await
+    }
+
+    async fn validator_staking_stats(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        validator_id: String,
+    ) -> async_graphql::Result<Option<crate::api::graphql::types::ValidatorStakingStats>> {
+        resolve_validator_staking_stats(ctx, validator_id).await
+    }
+
+    async fn pending_undelegations(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::Undelegate>> {
+        resolve_pending_undelegations(ctx, limit, offset).await
+    }
+
+    async fn undelegations_releasing_soon(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        current_height: i64,
+        blocks_ahead: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::Undelegate>> {
+        resolve_undelegations_releasing_soon(ctx, current_height, blocks_ahead).await
     }
 }

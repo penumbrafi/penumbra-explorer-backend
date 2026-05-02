@@ -3056,3 +3056,119 @@ pub async fn update_old_pending_transactions(
 
     Ok(())
 }
+
+// IBC withdrawal tracking for capital outflow monitoring
+pub async fn process_ibc_withdrawals(
+    dbtx: &mut PgTransaction<'_>,
+    tx_hash: [u8; 32],
+    tx_json: &Value,
+    block_height: u64,
+    timestamp: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let Some(action_views) = tx_json
+        .get("bodyView")
+        .and_then(|bv| bv.get("actionViews"))
+        .and_then(|av| av.as_array())
+    else {
+        return Ok(());
+    };
+
+    for action_view in action_views {
+        if let Some(ics20_withdrawal) = action_view.get("ics20Withdrawal") {
+            if let Err(e) =
+                index_ics20_withdrawal(dbtx, tx_hash, ics20_withdrawal, block_height, timestamp)
+                    .await
+            {
+                tracing::error!(
+                    "failed to index ics20 withdrawal in tx {}: {}",
+                    hex::encode(tx_hash),
+                    e
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn index_ics20_withdrawal(
+    dbtx: &mut PgTransaction<'_>,
+    tx_hash: [u8; 32],
+    withdrawal: &Value,
+    block_height: u64,
+    timestamp: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    let denom = withdrawal
+        .get("denom")
+        .and_then(|d| d.get("denom"))
+        .and_then(|d| d.as_str())
+        .unwrap_or("");
+
+    let asset_id = withdrawal
+        .get("denom")
+        .and_then(|d| d.get("inner"))
+        .and_then(|i| i.as_str())
+        .unwrap_or(denom);
+
+    let amount = withdrawal
+        .get("amount")
+        .and_then(|a| a.get("lo"))
+        .and_then(|lo| lo.as_str())
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    let destination_chain_address = withdrawal
+        .get("destinationChainAddress")
+        .and_then(|a| a.as_str())
+        .unwrap_or("");
+
+    let source_channel = withdrawal
+        .get("sourceChannel")
+        .and_then(|c| c.as_str())
+        .map(|s| s.to_string());
+
+    let return_address = withdrawal
+        .get("returnAddress")
+        .and_then(|ra| ra.get("inner"))
+        .and_then(|i| i.as_str())
+        .map(|s| s.to_string());
+
+    let timeout_height = withdrawal
+        .get("timeoutHeight")
+        .and_then(|th| th.get("revisionHeight"))
+        .and_then(|rh| rh.as_i64());
+
+    let timeout_timestamp = withdrawal
+        .get("timeoutTime")
+        .and_then(|tt| tt.as_i64());
+
+    let use_compat_address = withdrawal
+        .get("useCompatAddress")
+        .and_then(|u| u.as_bool())
+        .unwrap_or(false);
+
+    sqlx::query(
+        r"INSERT INTO ibc_withdrawals
+        (tx_hash, asset_id, amount, denom, destination_chain_address,
+         source_channel, return_address, timeout_height, timeout_timestamp,
+         use_compat_address, block_height, timestamp)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ON CONFLICT (tx_hash, asset_id, destination_chain_address) DO NOTHING",
+    )
+    .bind(&tx_hash[..])
+    .bind(asset_id)
+    .bind(amount)
+    .bind(denom)
+    .bind(destination_chain_address)
+    .bind(source_channel)
+    .bind(return_address)
+    .bind(timeout_height)
+    .bind(timeout_timestamp)
+    .bind(use_compat_address)
+    .bind(block_height as i64)
+    .bind(timestamp)
+    .execute(dbtx.as_mut())
+    .await?;
+
+    Ok(())
+}

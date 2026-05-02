@@ -4,7 +4,8 @@ use crate::api::graphql::{
     types::{
         BatchSwap, CollectionLimit, DexStats, IndividualSwap, LiquidityPosition,
         LiquidityPositionCollection, LiquidityPositionFilter, LiquidityPositionState,
-        LiquidityPositionStateFilter, RouteStep, SwapExecution, SwapExecutionFilter,
+        LiquidityPositionStateFilter, RecentSwapPrice, RouteStep, SwapExecution,
+        SwapExecutionFilter, SwapVolumeHistory, TradingPairLiquidity, TradingVolume24h,
     },
 };
 use async_graphql::Result;
@@ -299,4 +300,216 @@ pub async fn resolve_dex_stats(ctx: &async_graphql::Context<'_>) -> Result<DexSt
         total_executions,
         open_positions,
     })
+}
+
+/// Resolves active liquidity aggregated by trading pair
+///
+/// # Errors
+/// Returns an error if the database query fails
+pub async fn resolve_trading_pair_liquidity(
+    ctx: &async_graphql::Context<'_>,
+    limit: Option<i32>,
+) -> Result<Vec<TradingPairLiquidity>> {
+    let db = &ctx.data_unchecked::<ApiContext>().db;
+    let limit = i64::from(limit.unwrap_or(20).min(100));
+
+    let rows = sqlx::query(
+        r"
+        SELECT
+            trading_pair_asset1,
+            trading_pair_asset2,
+            COUNT(*) as active_positions,
+            SUM(reserves1_amount)::TEXT as total_reserves1,
+            SUM(reserves2_amount)::TEXT as total_reserves2,
+            AVG(fee_percentage) as avg_fee_percentage
+        FROM dex_liquidity_positions
+        WHERE state IN ('Open', 'Executing')
+        GROUP BY trading_pair_asset1, trading_pair_asset2
+        ORDER BY COUNT(*) DESC
+        LIMIT $1
+        ",
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let avg_fee: sqlx::types::BigDecimal = row.get("avg_fee_percentage");
+            TradingPairLiquidity {
+                trading_pair_asset1: row.get("trading_pair_asset1"),
+                trading_pair_asset2: row.get("trading_pair_asset2"),
+                active_positions: row.get("active_positions"),
+                total_reserves1: row.get("total_reserves1"),
+                total_reserves2: row.get("total_reserves2"),
+                avg_fee_percentage: avg_fee.to_string().parse::<f64>().unwrap_or(0.0),
+            }
+        })
+        .collect())
+}
+
+/// Resolves 24h trading volume per asset
+///
+/// # Errors
+/// Returns an error if the database query fails
+pub async fn resolve_trading_volume_24h(
+    ctx: &async_graphql::Context<'_>,
+    limit: Option<i32>,
+) -> Result<Vec<TradingVolume24h>> {
+    let db = &ctx.data_unchecked::<ApiContext>().db;
+    let limit = i64::from(limit.unwrap_or(20).min(100));
+
+    // Per-asset touch volume: counts each swap once per asset it touches.
+    // swap_count reflects distinct swaps involving this asset (deduplicated).
+    let rows = sqlx::query(
+        r"
+        SELECT
+            asset_id,
+            SUM(volume)::TEXT as volume_24h,
+            COUNT(DISTINCT swap_id) as swap_count_24h,
+            MIN(period_start) as period_start,
+            MAX(period_end) as period_end
+        FROM (
+            SELECT
+                id as swap_id,
+                total_input_asset_id as asset_id,
+                total_input_amount as volume,
+                block_timestamp as period_start,
+                block_timestamp as period_end
+            FROM dex_batch_swaps
+            WHERE block_timestamp > NOW() - INTERVAL '24 hours'
+
+            UNION ALL
+
+            SELECT
+                id as swap_id,
+                total_output_asset_id as asset_id,
+                total_output_amount as volume,
+                block_timestamp as period_start,
+                block_timestamp as period_end
+            FROM dex_batch_swaps
+            WHERE block_timestamp > NOW() - INTERVAL '24 hours'
+        ) combined
+        GROUP BY asset_id
+        ORDER BY SUM(volume) DESC
+        LIMIT $1
+        ",
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let volume: String = row.get("volume_24h");
+            let period_start: Option<chrono::DateTime<chrono::Utc>> = row.get("period_start");
+            let period_end: Option<chrono::DateTime<chrono::Utc>> = row.get("period_end");
+            TradingVolume24h {
+                asset_id: row.get("asset_id"),
+                volume_24h: volume,
+                swap_count_24h: row.get("swap_count_24h"),
+                period_start: period_start.map(DateTime),
+                period_end: period_end.map(DateTime),
+            }
+        })
+        .collect())
+}
+
+/// Resolves recent swap prices (implied from last hour of swaps)
+///
+/// # Errors
+/// Returns an error if the database query fails
+pub async fn resolve_recent_swap_prices(
+    ctx: &async_graphql::Context<'_>,
+    limit: Option<i32>,
+) -> Result<Vec<RecentSwapPrice>> {
+    let db = &ctx.data_unchecked::<ApiContext>().db;
+    let limit = i64::from(limit.unwrap_or(20).min(100));
+
+    // Volume-weighted average price: SUM(output) / SUM(input)
+    let rows = sqlx::query(
+        r"
+        SELECT
+            total_input_asset_id,
+            total_output_asset_id,
+            CASE WHEN SUM(CAST(total_input_amount AS NUMERIC)) > 0
+                THEN SUM(CAST(total_output_amount AS NUMERIC)) / SUM(CAST(total_input_amount AS NUMERIC))
+                ELSE 0
+            END as avg_price,
+            COUNT(*) as swap_count,
+            MAX(block_timestamp) as latest_swap
+        FROM dex_batch_swaps
+        WHERE block_timestamp > NOW() - INTERVAL '1 hour'
+          AND total_input_amount > 0
+        GROUP BY total_input_asset_id, total_output_asset_id
+        ORDER BY COUNT(*) DESC
+        LIMIT $1
+        ",
+    )
+    .bind(limit)
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let avg_price: Option<sqlx::types::BigDecimal> = row.get("avg_price");
+            let latest_swap: Option<chrono::DateTime<chrono::Utc>> = row.get("latest_swap");
+            RecentSwapPrice {
+                input_asset_id: row.get("total_input_asset_id"),
+                output_asset_id: row.get("total_output_asset_id"),
+                avg_price: avg_price
+                    .map(|p| p.to_string().parse::<f64>().unwrap_or(0.0))
+                    .unwrap_or(0.0),
+                swap_count: row.get("swap_count"),
+                latest_swap: latest_swap.map(DateTime),
+            }
+        })
+        .collect())
+}
+
+/// Resolves daily swap volume history for charts
+///
+/// # Errors
+/// Returns an error if the database query fails
+pub async fn resolve_swap_volume_history(
+    ctx: &async_graphql::Context<'_>,
+    days: Option<i32>,
+) -> Result<Vec<SwapVolumeHistory>> {
+    let db = &ctx.data_unchecked::<ApiContext>().db;
+    let days = i64::from(days.unwrap_or(30).min(365));
+
+    let rows = sqlx::query(
+        r"
+        SELECT
+            DATE(block_timestamp) as date,
+            SUM(total_input_amount)::TEXT as total_volume,
+            COUNT(*) as swap_count,
+            COUNT(*) FILTER (WHERE execution_type = 'Arb') as arb_count,
+            COUNT(*) FILTER (WHERE execution_type != 'Arb') as organic_count
+        FROM dex_batch_swaps
+        WHERE block_timestamp > NOW() - make_interval(days => $1)
+        GROUP BY DATE(block_timestamp)
+        ORDER BY date ASC
+        ",
+    )
+    .bind(days)
+    .fetch_all(db)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let date: chrono::NaiveDate = row.get("date");
+            SwapVolumeHistory {
+                date: date.to_string(),
+                total_volume: row.get("total_volume"),
+                swap_count: row.get("swap_count"),
+                arb_count: row.get("arb_count"),
+                organic_count: row.get("organic_count"),
+            }
+        })
+        .collect())
 }

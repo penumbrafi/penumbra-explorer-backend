@@ -5,6 +5,7 @@ mod event;
 pub mod governance;
 pub mod ibc;
 pub mod inputs;
+pub mod staking;
 mod stats;
 #[allow(clippy::module_name_repetitions)]
 pub mod subscription;
@@ -19,11 +20,12 @@ pub use event::*;
 pub use governance::*;
 pub use ibc::Stats as IbcStats;
 pub use inputs::{
-    BlockFilter, BlockHeightRange, BlocksSelector, CollectionLimit, IbcStatsFilter, LatestBlock,
-    LatestTransactions, LiquidityPositionFilter, LiquidityPositionStateFilter, SwapExecutionFilter,
-    TransactionFilter, TransactionRange, TransactionsSelector, ValidatorFilter,
-    ValidatorStateFilter,
+    BlockFilter, BlockHeightRange, BlocksSelector, CollectionLimit, IbcStatusFilter,
+    IbcStatsFilter, LatestBlock, LatestTransactions, LiquidityPositionFilter,
+    LiquidityPositionStateFilter, SwapExecutionFilter, TransactionFilter, TransactionRange,
+    TransactionsSelector, ValidatorFilter, ValidatorStateFilter,
 };
+pub use staking::{Delegate, Undelegate, ValidatorStakingStats};
 pub use stats::*;
 pub use subscription::*;
 pub use transaction::{

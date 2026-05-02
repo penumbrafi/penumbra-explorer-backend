@@ -47,6 +47,16 @@ pub struct TotalShieldedVolume {
     pub value: String,
 }
 
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(rename_fields = "camelCase")]
+pub struct IbcFlowHistory {
+    pub date: String,
+    pub inflow_volume: String,
+    pub outflow_volume: String,
+    pub inflow_count: i64,
+    pub outflow_count: i64,
+}
+
 impl ChannelPair {
     /// Gets channel pairs for a specific client ID
     ///

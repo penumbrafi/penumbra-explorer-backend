@@ -74,6 +74,7 @@ impl VotingPowerBatch {
         &mut self,
         dbtx: &mut PgTransaction<'_>,
         timestamp: DateTime<Utc>,
+        height: u64,
     ) -> Result<()> {
         if self.changes.is_empty() {
             return Ok(());
@@ -90,6 +91,22 @@ impl VotingPowerBatch {
                     .await
             {
                 error!("Failed to update voting power for {}: {}", identity_key, e);
+            }
+
+            // Store voting power history
+            if let Err(e) = Self::store_voting_power_history(
+                identity_key,
+                *voting_power,
+                height,
+                timestamp,
+                dbtx,
+            )
+            .await
+            {
+                error!(
+                    "Failed to store voting power history for {}: {}",
+                    identity_key, e
+                );
             }
         }
 
@@ -113,6 +130,34 @@ impl VotingPowerBatch {
         }
 
         self.changes.clear();
+
+        Ok(())
+    }
+
+    /// Store voting power change in history table
+    async fn store_voting_power_history(
+        identity_key: &str,
+        voting_power: i64,
+        height: u64,
+        timestamp: DateTime<Utc>,
+        dbtx: &mut PgTransaction<'_>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO validator_voting_power_history
+                (validator_identity_key, voting_power, block_height, timestamp)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (validator_identity_key, block_height) DO UPDATE
+            SET voting_power = EXCLUDED.voting_power,
+                timestamp = EXCLUDED.timestamp
+            "#
+        )
+        .bind(identity_key)
+        .bind(voting_power)
+        .bind(height as i64)
+        .bind(timestamp)
+        .execute(dbtx.as_mut())
+        .await?;
 
         Ok(())
     }
@@ -1717,7 +1762,7 @@ impl Validator {
             }
         }
 
-        if let Err(e) = voting_power_batch.apply_all(dbtx, timestamp).await {
+        if let Err(e) = voting_power_batch.apply_all(dbtx, timestamp, height).await {
             error!("Failed to apply batched voting power changes: {}", e);
         }
 

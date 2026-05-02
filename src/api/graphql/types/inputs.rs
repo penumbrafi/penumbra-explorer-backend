@@ -48,11 +48,39 @@ pub struct BlockFilter {
     pub height: Option<i32>,
 }
 
+#[derive(Enum, Copy, Clone, Eq, PartialEq)]
+pub enum IbcStatusFilter {
+    #[graphql(name = "PENDING")]
+    Pending,
+    #[graphql(name = "COMPLETED")]
+    Completed,
+    #[graphql(name = "EXPIRED")]
+    Expired,
+    #[graphql(name = "ERROR")]
+    Error,
+    #[graphql(name = "UNKNOWN")]
+    Unknown,
+}
+
+impl IbcStatusFilter {
+    #[must_use]
+    pub fn as_db_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Completed => "completed",
+            Self::Expired => "expired",
+            Self::Error => "error",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
 #[derive(InputObject)]
 pub struct TransactionFilter {
     pub hash: Option<String>,
     pub client_id: Option<String>,
     pub validator: Option<String>,
+    pub ibc_status: Option<IbcStatusFilter>,
 }
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq)]
