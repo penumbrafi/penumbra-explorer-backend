@@ -490,7 +490,7 @@ pub async fn resolve_swap_volume_history(
             COUNT(*) FILTER (WHERE execution_type = 'Arb') as arb_count,
             COUNT(*) FILTER (WHERE execution_type != 'Arb') as organic_count
         FROM dex_batch_swaps
-        WHERE block_timestamp > NOW() - make_interval(days => $1)
+        WHERE block_timestamp > NOW() - make_interval(days => $1::int)
         GROUP BY DATE(block_timestamp)
         ORDER BY date ASC
         ",
