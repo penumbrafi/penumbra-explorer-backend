@@ -116,8 +116,16 @@ impl Explorer {
     /// # Panics
     /// Panics if CORS origin URLs cannot be parsed
     pub async fn run(&self) -> Result<()> {
+        // Sized to actual concurrent query load — single-digit. The previous
+        // value of 200 caused PG backend bloat (each connection costs ~10–20MB
+        // shared + 3–10MB private; 200 idle PoolConnection slots also held row
+        // buffers and TLS state) and was a contributing factor to the OOM
+        // thrash that took the container down. Idle connections are released
+        // after 60s so we don't hold a permanent floor.
         let pool = PgPoolOptions::new()
-            .max_connections(200)
+            .max_connections(20)
+            .min_connections(2)
+            .idle_timeout(Some(Duration::from_secs(60)))
             .connect(&self.options.dest_db_url)
             .await
             .context("Failed to connect to destination database for API")?;
