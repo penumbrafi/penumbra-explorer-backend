@@ -422,24 +422,27 @@ impl Root {
         ctx: &Context<'_>,
         validator_id: String,
     ) -> Result<impl Stream<Item = ValidatorBlockUpdate> + '_> {
-        let pool = ctx.data::<PgPool>()?;
         let pubsub = ctx.data::<PubSub>()?;
 
-        let receiver = pubsub
-            .validator_blocks_subscribe(validator_id, pool.clone())
-            .await;
+        let receiver = pubsub.validator_blocks_subscribe();
         let stream = tokio_stream::wrappers::BroadcastStream::new(receiver);
 
-        Ok(stream.filter_map(|result| async move {
-            match result {
-                Ok(event) => Some(ValidatorBlockUpdate {
-                    validator_id: event.validator_id,
-                    block_height: event.block_height,
-                    signed: event.signed,
-                }),
-                Err(e) => {
-                    error!("Error receiving validator block update: {}", e);
-                    None
+        // Filter by validator_id at the resolver — subscriber-side filter on
+        // a shared global broadcast (vs a per-id channel that leaks).
+        Ok(stream.filter_map(move |result| {
+            let want = validator_id.clone();
+            async move {
+                match result {
+                    Ok(event) if event.validator_id == want => Some(ValidatorBlockUpdate {
+                        validator_id: event.validator_id,
+                        block_height: event.block_height,
+                        signed: event.signed,
+                    }),
+                    Ok(_) => None,
+                    Err(e) => {
+                        error!("Error receiving validator block update: {}", e);
+                        None
+                    }
                 }
             }
         }))

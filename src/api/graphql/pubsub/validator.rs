@@ -20,85 +20,58 @@ struct ValidatorBlockNotification {
     signed: bool,
 }
 
-pub async fn listen_validator_blocks(
-    pubsub: super::PubSub,
-    pool: Pool<Postgres>,
-    validator_id: String,
-) {
-    info!("Starting validator block listener for {}", validator_id);
+/// Single global PgListener that fans every validator_block notification
+/// out via the broadcast::Sender on PubSub. Subscribers filter by
+/// validator_id at the resolver layer.
+pub async fn listen_validator_blocks(pubsub: super::PubSub, pool: Pool<Postgres>) {
+    info!("Starting global validator block listener");
 
     let mut listener = match PgListener::connect_with(&pool).await {
         Ok(listener) => listener,
         Err(e) => {
-            error!(
-                "Failed to create PostgreSQL listener for validator {}: {}",
-                validator_id, e
-            );
+            error!("Failed to create PostgreSQL listener for validator blocks: {}", e);
             return;
         }
     };
 
     if let Err(e) = listener.listen("explorer_validator_block_update").await {
-        error!(
-            "Failed to listen to validator block updates for {}: {}",
-            validator_id, e
-        );
+        error!("Failed to listen to validator block updates: {}", e);
         return;
     }
 
-    info!(
-        "Successfully connected to PostgreSQL notifications for validator blocks: {}",
-        validator_id
-    );
+    info!("Connected to PostgreSQL notifications for validator blocks");
 
     loop {
         match listener.recv().await {
             Ok(notification) => {
                 match serde_json::from_str::<ValidatorBlockNotification>(notification.payload()) {
                     Ok(data) => {
-                        if data.validator_id == validator_id {
-                            debug!(
-                                "Notification: New validator block for {} at height {} (signed: {})",
-                                data.validator_id, data.block_height, data.signed
-                            );
-
-                            let event = ValidatorBlockEvent {
-                                validator_id: data.validator_id,
-                                block_height: data.block_height,
-                                signed: data.signed,
-                            };
-
-                            let pubsub_clone = pubsub.clone();
-                            tokio::spawn(async move {
-                                pubsub_clone.publish_validator_block(event).await;
-                            });
-                        }
+                        debug!(
+                            "Notification: validator {} block {} (signed: {})",
+                            data.validator_id, data.block_height, data.signed
+                        );
+                        // publish_validator_block is now sync (broadcast::send is
+                        // sync), so no spawned task per notification.
+                        pubsub.publish_validator_block(ValidatorBlockEvent {
+                            validator_id: data.validator_id,
+                            block_height: data.block_height,
+                            signed: data.signed,
+                        });
                     }
-                    Err(e) => {
-                        warn!("Failed to parse validator block notification: {}", e);
-                    }
+                    Err(e) => warn!("Failed to parse validator block notification: {}", e),
                 }
             }
             Err(e) => {
-                error!(
-                    "Error receiving notification for validator {}: {}",
-                    validator_id, e
-                );
+                error!("Error receiving validator block notification: {}", e);
                 if let Err(e) = listener.listen("explorer_validator_block_update").await {
-                    error!(
-                        "Failed to re-listen after error for validator {}: {}",
-                        validator_id, e
-                    );
+                    error!("Failed to re-listen after error: {}", e);
                     break;
                 }
             }
         }
     }
 
-    warn!(
-        "Notification listener exited for validator {}",
-        validator_id
-    );
+    warn!("Validator block notification listener exited");
 }
 
 #[derive(Clone, Debug)]

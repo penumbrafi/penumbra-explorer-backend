@@ -1,9 +1,6 @@
 use async_graphql::Context;
 use sqlx::{Pool, Postgres};
-use std::collections::HashMap;
-use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 pub mod ibc;
@@ -21,7 +18,12 @@ pub struct PubSub {
     transaction_count_tx: broadcast::Sender<i64>,
     ibc_transactions_tx: broadcast::Sender<IbcTransactionEvent>,
     total_shielded_volume_tx: broadcast::Sender<String>,
-    validator_blocks_channels: Arc<RwLock<HashMap<String, broadcast::Sender<ValidatorBlockEvent>>>>,
+    /// Single global broadcast for all validator block events.
+    /// Subscribers filter by validator_id at the resolver layer.
+    /// (Was previously a HashMap per-validator_id which never freed entries
+    /// and leaked PgListener connections + tasks; ~675 events/s × N visited
+    /// validators of state forever.)
+    validator_blocks_tx: broadcast::Sender<ValidatorBlockEvent>,
     chain_parameters_tx: broadcast::Sender<ChainParametersEvent>,
 }
 
@@ -39,6 +41,7 @@ impl PubSub {
         let (transaction_count_tx, _) = broadcast::channel(1000);
         let (ibc_transactions_tx, _) = broadcast::channel(1000);
         let (total_shielded_volume_tx, _) = broadcast::channel(1000);
+        let (validator_blocks_tx, _) = broadcast::channel(2048);
         let (chain_parameters_tx, _) = broadcast::channel(1000);
 
         Self {
@@ -47,7 +50,7 @@ impl PubSub {
             transaction_count_tx,
             ibc_transactions_tx,
             total_shielded_volume_tx,
-            validator_blocks_channels: Arc::new(RwLock::new(HashMap::new())),
+            validator_blocks_tx,
             chain_parameters_tx,
         }
     }
@@ -82,27 +85,12 @@ impl PubSub {
         self.chain_parameters_tx.subscribe()
     }
 
-    pub async fn validator_blocks_subscribe(
-        &self,
-        validator_id: String,
-        pool: Pool<Postgres>,
-    ) -> broadcast::Receiver<ValidatorBlockEvent> {
-        let mut channels = self.validator_blocks_channels.write().await;
-
-        if let Some(tx) = channels.get(&validator_id) {
-            return tx.subscribe();
-        }
-
-        let (tx, rx) = broadcast::channel(1000);
-        channels.insert(validator_id.clone(), tx.clone());
-
-        let pubsub_clone = self.clone();
-        let validator_id_clone = validator_id.clone();
-        tokio::spawn(async move {
-            validator::listen_validator_blocks(pubsub_clone, pool, validator_id_clone).await;
-        });
-
-        rx
+    /// Subscribe to ALL validator block events. Caller filters by
+    /// validator_id at the resolver layer. The single global PgListener is
+    /// started once via `start_subscriptions`, not per subscriber.
+    #[must_use]
+    pub fn validator_blocks_subscribe(&self) -> broadcast::Receiver<ValidatorBlockEvent> {
+        self.validator_blocks_tx.subscribe()
     }
 
     pub fn publish_block(&self, height: i64) {
@@ -176,25 +164,18 @@ impl PubSub {
         }
     }
 
-    pub async fn publish_validator_block(&self, event: ValidatorBlockEvent) {
-        let channels = self.validator_blocks_channels.read().await;
-
-        if let Some(tx) = channels.get(&event.validator_id) {
-            match tx.send(event.clone()) {
-                Ok(_) => debug!(
-                    "Published validator block update for {}: height {} signed {}",
-                    event.validator_id, event.block_height, event.signed
-                ),
-                Err(e) => {
-                    let receiver_count = tx.receiver_count();
-                    if receiver_count == 0 {
-                        debug!(
-                            "No receivers for validator {} block update",
-                            event.validator_id
-                        );
-                    } else {
-                        warn!("Failed to publish validator block update: {}", e);
-                    }
+    pub fn publish_validator_block(&self, event: ValidatorBlockEvent) {
+        match self.validator_blocks_tx.send(event.clone()) {
+            Ok(_) => debug!(
+                "Published validator block update for {}: height {} signed {}",
+                event.validator_id, event.block_height, event.signed
+            ),
+            Err(e) => {
+                let receiver_count = self.validator_blocks_tx.receiver_count();
+                if receiver_count == 0 {
+                    debug!("No receivers for validator block update");
+                } else {
+                    warn!("Failed to publish validator block update: {}", e);
                 }
             }
         }
@@ -261,6 +242,15 @@ impl PubSub {
         let pool_clone = pool.clone();
         tokio::spawn(async move {
             validator::listen_chain_parameters(pubsub_clone, pool_clone).await;
+        });
+
+        // Single global validator-block listener — replaces the per-id
+        // listener-per-subscription pattern that leaked PgListener
+        // connections + tasks for every distinct validator_id ever queried.
+        let pubsub_clone = self.clone();
+        let pool_clone = pool.clone();
+        tokio::spawn(async move {
+            validator::listen_validator_blocks(pubsub_clone, pool_clone).await;
         });
     }
 }
