@@ -4,6 +4,44 @@ use chrono::{DateTime, Utc};
 use sqlx::types::BigDecimal;
 use sqlx::{FromRow, PgPool};
 
+/// Time window for validator-growth ranking queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum GrowthWindow {
+    #[graphql(name = "H24")]
+    H24,
+    #[graphql(name = "D7")]
+    D7,
+    #[graphql(name = "D30")]
+    D30,
+}
+
+impl GrowthWindow {
+    pub fn interval_sql(self) -> &'static str {
+        match self {
+            Self::H24 => "24 hours",
+            Self::D7 => "7 days",
+            Self::D30 => "30 days",
+        }
+    }
+}
+
+/// One entry in the validators-by-growth ranking. growth_pct is the
+/// percentage change between current voting_power and the value as of
+/// the start of the requested window. Validators with no historical
+/// snapshot at that point are returned with `past_voting_power = 0`
+/// and `growth_pct = null` so the client can decide how to render them
+/// (e.g. badge "new" rather than infinite-growth).
+#[derive(Debug, Clone, SimpleObject, FromRow)]
+pub struct ValidatorGrowthEntry {
+    pub validator_identity_key: String,
+    pub name: Option<String>,
+    pub state: Option<String>,
+    pub current_voting_power: i64,
+    pub past_voting_power: i64,
+    pub growth_absolute: i64,
+    pub growth_pct: Option<f64>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 #[allow(clippy::module_name_repetitions)]
 pub enum ValidatorState {

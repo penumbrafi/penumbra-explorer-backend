@@ -31,7 +31,10 @@ pub use staking::{
 pub use stats::resolve_stats;
 pub use subscription::Root as SubscriptionRoot;
 pub use transaction::{resolve_transaction, resolve_transactions_collection};
-pub use validator::{resolve_validator_details, resolve_validator_voting_power_history, resolve_validators_homepage};
+pub use validator::{
+    resolve_validator_details, resolve_validator_voting_power_history, resolve_validators_by_growth,
+    resolve_validators_homepage,
+};
 
 pub struct QueryRoot;
 
@@ -180,6 +183,19 @@ impl QueryRoot {
         limit: Option<i32>,
     ) -> async_graphql::Result<Vec<crate::api::graphql::types::validator::VotingPowerHistoryEntry>> {
         resolve_validator_voting_power_history(ctx, validator_id, start_time, end_time, limit).await
+    }
+
+    /// Validators ranked by recent voting-power growth — surfaces fastest-
+    /// growing operators so delegators can find newcomers and reward
+    /// activity. See resolvers/validator.rs::resolve_validators_by_growth.
+    async fn validators_by_growth(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+        window: crate::api::graphql::types::validator::GrowthWindow,
+        limit: Option<i32>,
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::validator::ValidatorGrowthEntry>>
+    {
+        resolve_validators_by_growth(ctx, window, limit).await
     }
 
     async fn liquidity_positions(
