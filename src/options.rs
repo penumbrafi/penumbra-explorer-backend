@@ -36,7 +36,7 @@ pub struct ExplorerOptions {
     #[arg(
         short = 'g',
         long,
-        default_value = "https://penumbra-1.radiantcommons.com"
+        default_value = "https://penumbra.rotko.net"
     )]
     pub grpc_url: String,
 }
