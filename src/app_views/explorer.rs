@@ -2102,67 +2102,92 @@ CREATE TABLE IF NOT EXISTS ibc_transfers (
             }
         }
 
+        // Live mode = small batch (1 block at a time, caught up to chain tip).
+        // Batch mode = catching up from genesis or after restart, hundreds of
+        // blocks per tick.
+        //
+        // Previously batch mode skipped uptime calculation entirely "for
+        // performance" — but recalculate_all_uptime_stats is one indexed
+        // scan over the rolling window (≤ uptime_blocks_window rows), which
+        // costs the same regardless of how many blocks the indexer just
+        // ingested. Skipping it during catch-up meant validator_uptime_stats
+        // stayed empty for the entire catch-up period, and the frontend
+        // saw uptime=0 for every validator until the indexer happened to
+        // tick with <100 blocks AND the row had `last_calculated_height > 0`
+        // (chicken-and-egg, never resolved without a manual backfill).
+        //
+        // Now: always run the full recalc at end-of-batch. In live mode we
+        // still do per-block incremental updates first so the
+        // last_calculated_height advances; the trailing recalc rebuilds the
+        // window-bounded aggregate to keep it correct as old blocks fall
+        // out of the window. Cost: one extra SQL per indexer tick — well
+        // under a millisecond on a populated cluster.
         const LIVE_MODE_THRESHOLD: usize = 100;
 
         if num_blocks > 0 {
             let last_height = block_heights.last().copied().unwrap_or(0);
+            let last_height_i64 = i64::try_from(last_height).unwrap_or(i64::MAX);
 
             if num_blocks >= LIVE_MODE_THRESHOLD {
                 tracing::debug!(
-                    "Batch mode detected ({} blocks) - skipping uptime calculations for performance",
+                    "Batch mode ({} blocks) — running uptime aggregate at batch end",
                     num_blocks
                 );
 
                 if let Err(e) = validator::Validator::enforce_rolling_window_batch(
                     dbtx,
-                    i64::try_from(last_height).unwrap_or(i64::MAX),
+                    last_height_i64,
                     i64::try_from(num_blocks).unwrap_or(i64::MAX),
                 )
                 .await
                 {
                     tracing::error!("Failed to enforce rolling window for batch: {}", e);
                 }
+
+                if let Err(e) = validator::Validator::recalculate_all_uptime_stats(
+                    last_height_i64,
+                    dbtx,
+                )
+                .await
+                {
+                    tracing::error!("Failed to recalculate uptime stats after batch: {}", e);
+                }
             } else {
                 tracing::debug!(
-                    "Live mode detected ({} blocks) - calculating uptime stats",
+                    "Live mode ({} blocks) — incremental + trailing recalc",
                     num_blocks
                 );
 
-                let needs_full_recalc =
-                    validator::Validator::check_needs_full_uptime_recalculation(
-                        dbtx,
-                        i64::try_from(last_height).unwrap_or(i64::MAX),
-                    )
-                    .await?;
-
-                if needs_full_recalc {
-                    tracing::info!(
-                        "First time in live mode - performing full uptime calculation for all validators"
-                    );
-
-                    if let Err(e) = validator::Validator::recalculate_all_uptime_stats(
-                        i64::try_from(last_height).unwrap_or(i64::MAX),
+                // Incremental updates first so per-validator state advances.
+                for &height in &block_heights {
+                    if let Err(e) = validator::Validator::update_uptime_stats_incrementally(
+                        i64::try_from(height).unwrap_or(i64::MAX),
                         dbtx,
                     )
                     .await
                     {
-                        tracing::error!("Failed to recalculate all uptime stats: {}", e);
+                        tracing::error!(
+                            "Failed to update uptime stats for block {}: {}",
+                            height,
+                            e
+                        );
                     }
-                } else {
-                    for &height in &block_heights {
-                        if let Err(e) = validator::Validator::update_uptime_stats_incrementally(
-                            i64::try_from(height).unwrap_or(i64::MAX),
-                            dbtx,
-                        )
-                        .await
-                        {
-                            tracing::error!(
-                                "Failed to update uptime stats for block {}: {}",
-                                height,
-                                e
-                            );
-                        }
-                    }
+                }
+
+                // Trailing full recalc keeps window-bounded aggregates
+                // honest as blocks fall off the back of the window. Cheap
+                // — single grouped scan over validator_blocks within the
+                // window.
+                if let Err(e) = validator::Validator::recalculate_all_uptime_stats(
+                    last_height_i64,
+                    dbtx,
+                )
+                .await
+                {
+                    tracing::error!(
+                        "Failed to recalculate uptime stats in live mode: {}",
+                        e
+                    );
                 }
             }
         }
