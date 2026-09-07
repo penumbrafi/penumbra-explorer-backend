@@ -1,0 +1,38 @@
+# /etc/systemd/system/penumbra-explorer.service
+#
+# The GraphQL backend behind https://api.explorer.penumbra.fi (alias
+# https://api.explorer.rotko.net) on :9000. The binary is built in GitHub
+# Actions and deployed by .github/workflows/deploy.yml.
+#
+#   /opt/penumbra-explorer-backend/releases/<sha>/penumbra-explorer
+#   /opt/penumbra-explorer-backend/current -> releases/<sha>
+#   /opt/penumbra-explorer-backend/.env    host-owned, never touched by CI
+[Unit]
+Description=Penumbra Explorer Backend
+After=postgresql.service network-online.target
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=web
+Group=web
+WorkingDirectory=/opt/penumbra-explorer-backend
+EnvironmentFile=/opt/penumbra-explorer-backend/.env
+ExecStart=/opt/penumbra-explorer-backend/current/penumbra-explorer -g https://penumbra.rotko.net
+Restart=always
+RestartSec=10
+MemoryHigh=8G
+MemoryMax=12G
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/log/penumbra-explorer /tmp
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

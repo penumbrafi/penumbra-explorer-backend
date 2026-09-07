@@ -150,7 +150,7 @@ impl VotingPowerBatch {
             ON CONFLICT (validator_identity_key, block_height) DO UPDATE
             SET voting_power = EXCLUDED.voting_power,
                 timestamp = EXCLUDED.timestamp
-            "#
+            "#,
         )
         .bind(identity_key)
         .bind(voting_power)

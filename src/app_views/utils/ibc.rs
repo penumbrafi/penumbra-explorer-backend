@@ -3138,9 +3138,7 @@ async fn index_ics20_withdrawal(
         .and_then(|th| th.get("revisionHeight"))
         .and_then(|rh| rh.as_i64());
 
-    let timeout_timestamp = withdrawal
-        .get("timeoutTime")
-        .and_then(|tt| tt.as_i64());
+    let timeout_timestamp = withdrawal.get("timeoutTime").and_then(|tt| tt.as_i64());
 
     let use_compat_address = withdrawal
         .get("useCompatAddress")

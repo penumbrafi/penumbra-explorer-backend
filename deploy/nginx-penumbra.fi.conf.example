@@ -1,0 +1,39 @@
+# nginx vhost to add in CT1102 for api.explorer.penumbra.fi.
+#
+# Documentation only: this repo never edits nginx or haproxy. Apply by hand
+# once penumbra.fi is delegated to Cloudflare and a certificate exists.
+# explorer.penumbra.fi itself is documented in the penumbra-explorer repo.
+#
+#   api.explorer.penumbra.fi (alias api.explorer.rotko.net) -> 10.6.78.85:9000
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.explorer.penumbra.fi;
+
+    location /.well-known/acme-challenge/ { root /var/www/html; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name api.explorer.penumbra.fi api.explorer.rotko.net;
+
+    ssl_certificate     /etc/letsencrypt/live/penumbra.fi/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/penumbra.fi/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    location / {
+        proxy_pass http://10.6.78.85:9000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # GraphQL subscriptions ride a websocket
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+    }
+}

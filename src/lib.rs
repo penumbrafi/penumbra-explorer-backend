@@ -162,6 +162,13 @@ impl Explorer {
         let cors = CorsLayer::new()
             .allow_origin([
                 "http://localhost:3000".parse().unwrap(),
+                // penumbrafi frontends served by this API
+                "https://explorer.penumbra.fi".parse().unwrap(),
+                "https://penumbra.fi".parse().unwrap(),
+                // kept as aliases until penumbra.fi is delegated
+                "https://explorer.rotko.net".parse().unwrap(),
+                "https://dex.rotko.net".parse().unwrap(),
+                // previous operator's deployments
                 "https://dev.explorer.penumbra.pklabs.me".parse().unwrap(),
                 "https://explorer.penumbra.pklabs.me".parse().unwrap(),
                 "https://explorer.penumbra.zone".parse().unwrap(),

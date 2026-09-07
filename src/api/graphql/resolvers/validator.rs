@@ -62,7 +62,7 @@ pub async fn resolve_validator_voting_power_history(
                 AND timestamp <= $3
             ORDER BY timestamp ASC
             LIMIT $4
-            "#
+            "#,
         )
         .bind(&validator_id)
         .bind(start)
@@ -83,7 +83,7 @@ pub async fn resolve_validator_voting_power_history(
                 AND timestamp >= $2
             ORDER BY timestamp ASC
             LIMIT $3
-            "#
+            "#,
         )
         .bind(&validator_id)
         .bind(start)
@@ -102,7 +102,7 @@ pub async fn resolve_validator_voting_power_history(
             WHERE validator_identity_key = $1
             ORDER BY timestamp ASC
             LIMIT $2
-            "#
+            "#,
         )
         .bind(&validator_id)
         .bind(limit as i64)

@@ -44,7 +44,8 @@ pub async fn resolve_ibc_flow_history(
     let db = &ctx.data_unchecked::<ApiContext>().db;
     let days = days.unwrap_or(30).min(365);
 
-    let mut where_clauses = vec!["t.timestamp > NOW() - make_interval(days => $1::int)".to_string()];
+    let mut where_clauses =
+        vec!["t.timestamp > NOW() - make_interval(days => $1::int)".to_string()];
     let mut param_idx = 1;
 
     if client_id.is_some() {

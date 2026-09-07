@@ -1,0 +1,137 @@
+# Build the explorer backend in Actions and ship the binary to CT1105.
+#
+# The build runs in rust:1.89-bookworm so the resulting binary links against
+# the same glibc/libpq as the Debian bookworm container it runs on; a binary
+# built on the bare ubuntu-latest runner would fail with a GLIBC_ error.
+name: deploy explorer backend
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+concurrency:
+  group: deploy-explorer-backend
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  ARTIFACT: penumbra-explorer-${{ github.sha }}
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    container: rust:1.89-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            pkg-config libssl-dev libpq-dev clang libclang-dev cmake zstd
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: build release binary
+        run: cargo build --release --locked --bin penumbra-explorer
+
+      - name: stage artifact
+        run: |
+          set -euo pipefail
+          mkdir -p stage
+          cp target/release/penumbra-explorer stage/
+          cat > stage/BUILD_INFO <<INFO
+          app=penumbra-explorer-backend
+          sha=${{ github.sha }}
+          ref=${{ github.ref }}
+          run_id=${{ github.run_id }}
+          built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          INFO
+          tar --zstd -C stage -cf "${ARTIFACT}.tar.zst" .
+          ls -lh "${ARTIFACT}.tar.zst"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}.tar.zst
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    name: attach to release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARTIFACT }}.tar.zst
+          fail_on_unmatched_files: true
+
+  deploy:
+    name: deploy to CT1105
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      APP_DIR: /opt/penumbra-explorer-backend
+      SERVICE: penumbra-explorer.service
+      SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT }}
+
+      - name: unpack
+        run: |
+          set -euo pipefail
+          mkdir -p payload
+          tar --zstd -C payload -xf "${ARTIFACT}.tar.zst"
+          chmod 755 payload/penumbra-explorer
+
+      - name: configure ssh
+        uses: ./.github/actions/ssh-deploy
+        with:
+          ssh-key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known-hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          jump-host: ${{ secrets.DEPLOY_HOST }}
+          target-host: ${{ secrets.DEPLOY_CT }}
+
+      - name: ship release
+        run: |
+          set -euo pipefail
+          ssh target "mkdir -p '${APP_DIR}/releases/${SHA}'"
+          rsync -a --delete -e ssh payload/ "target:${APP_DIR}/releases/${SHA}/"
+
+      - name: activate
+        run: |
+          set -euo pipefail
+          ssh target "APP_DIR='${APP_DIR}' SERVICE='${SERVICE}' SHA='${SHA}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          "releases/$SHA/penumbra-explorer" --help >/dev/null
+          ln -sfn "releases/$SHA" current.tmp
+          mv -Tf current.tmp current
+          ls -1dt releases/*/ | tail -n +6 | xargs -r rm -rf
+          sudo /usr/bin/systemctl restart "$SERVICE"
+          for _ in $(seq 1 30); do
+            systemctl is-active --quiet "$SERVICE" && break
+            sleep 2
+          done
+          systemctl is-active "$SERVICE"
+          REMOTE
+
+      - name: smoke test
+        run: ssh target 'curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:9000/'
