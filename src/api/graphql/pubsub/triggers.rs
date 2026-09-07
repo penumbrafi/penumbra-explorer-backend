@@ -115,7 +115,8 @@ pub async fn setup_notification_triggers(pool: &Pool<Postgres>) -> Result<(), sq
     // pubsub/listen.rs (poll_transaction_count). Subscribers see slightly less
     // frequent count updates (poll cadence) but the row-insert path is O(1)
     // instead of O(n).
-    sqlx::query(r"
+    sqlx::query(
+        r"
         CREATE OR REPLACE FUNCTION notify_transaction_update()
         RETURNS TRIGGER AS $$
         BEGIN
@@ -124,7 +125,10 @@ pub async fn setup_notification_triggers(pool: &Pool<Postgres>) -> Result<(), sq
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-    ").execute(pool).await?;
+    ",
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         r"

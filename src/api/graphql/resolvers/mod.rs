@@ -32,8 +32,8 @@ pub use stats::resolve_stats;
 pub use subscription::Root as SubscriptionRoot;
 pub use transaction::{resolve_transaction, resolve_transactions_collection};
 pub use validator::{
-    resolve_validator_details, resolve_validator_voting_power_history, resolve_validators_by_growth,
-    resolve_validators_homepage,
+    resolve_validator_details, resolve_validator_voting_power_history,
+    resolve_validators_by_growth, resolve_validators_homepage,
 };
 
 pub struct QueryRoot;
@@ -181,7 +181,8 @@ impl QueryRoot {
         start_time: Option<chrono::DateTime<chrono::Utc>>,
         end_time: Option<chrono::DateTime<chrono::Utc>>,
         limit: Option<i32>,
-    ) -> async_graphql::Result<Vec<crate::api::graphql::types::validator::VotingPowerHistoryEntry>> {
+    ) -> async_graphql::Result<Vec<crate::api::graphql::types::validator::VotingPowerHistoryEntry>>
+    {
         resolve_validator_voting_power_history(ctx, validator_id, start_time, end_time, limit).await
     }
 

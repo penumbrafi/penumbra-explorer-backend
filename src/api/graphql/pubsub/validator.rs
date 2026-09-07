@@ -29,7 +29,10 @@ pub async fn listen_validator_blocks(pubsub: super::PubSub, pool: Pool<Postgres>
     let mut listener = match PgListener::connect_with(&pool).await {
         Ok(listener) => listener,
         Err(e) => {
-            error!("Failed to create PostgreSQL listener for validator blocks: {}", e);
+            error!(
+                "Failed to create PostgreSQL listener for validator blocks: {}",
+                e
+            );
             return;
         }
     };

@@ -33,10 +33,6 @@ pub struct ExplorerOptions {
     pub polling_interval_ms: u64,
 
     /// The gRPC endpoint URL for IBC client status checks
-    #[arg(
-        short = 'g',
-        long,
-        default_value = "https://penumbra.rotko.net"
-    )]
+    #[arg(short = 'g', long, default_value = "https://penumbra.rotko.net")]
     pub grpc_url: String,
 }

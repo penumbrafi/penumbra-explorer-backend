@@ -1983,10 +1983,14 @@ CREATE TABLE IF NOT EXISTS ibc_transfers (
             let tx_bytes_base64 = encode_to_base64(tx_bytes);
 
             let tx_view = &formatted_tx_json["transaction_view"];
-            let _ = staking::process_delegate_actions(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
-            let _ = staking::process_undelegate_actions(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
+            let _ = staking::process_delegate_actions(dbtx, *tx_hash, tx_view, *height, *timestamp)
+                .await;
+            let _ =
+                staking::process_undelegate_actions(dbtx, *tx_hash, tx_view, *height, *timestamp)
+                    .await;
             let _ = staking::mark_undelegate_claimed(dbtx, tx_view).await;
-            let _ = ibc::process_ibc_withdrawals(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
+            let _ =
+                ibc::process_ibc_withdrawals(dbtx, *tx_hash, tx_view, *height, *timestamp).await;
 
             let meta = TransactionMetadata {
                 tx_hash: *tx_hash,
@@ -2144,11 +2148,8 @@ CREATE TABLE IF NOT EXISTS ibc_transfers (
                     tracing::error!("Failed to enforce rolling window for batch: {}", e);
                 }
 
-                if let Err(e) = validator::Validator::recalculate_all_uptime_stats(
-                    last_height_i64,
-                    dbtx,
-                )
-                .await
+                if let Err(e) =
+                    validator::Validator::recalculate_all_uptime_stats(last_height_i64, dbtx).await
                 {
                     tracing::error!("Failed to recalculate uptime stats after batch: {}", e);
                 }
@@ -2178,16 +2179,10 @@ CREATE TABLE IF NOT EXISTS ibc_transfers (
                 // honest as blocks fall off the back of the window. Cheap
                 // — single grouped scan over validator_blocks within the
                 // window.
-                if let Err(e) = validator::Validator::recalculate_all_uptime_stats(
-                    last_height_i64,
-                    dbtx,
-                )
-                .await
+                if let Err(e) =
+                    validator::Validator::recalculate_all_uptime_stats(last_height_i64, dbtx).await
                 {
-                    tracing::error!(
-                        "Failed to recalculate uptime stats in live mode: {}",
-                        e
-                    );
+                    tracing::error!("Failed to recalculate uptime stats in live mode: {}", e);
                 }
             }
         }

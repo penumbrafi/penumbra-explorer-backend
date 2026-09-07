@@ -23,8 +23,7 @@ pub async fn process_delegate_actions(
 
     for action_view in action_views {
         if let Some(delegate) = action_view.get("delegate") {
-            if let Err(e) = index_delegate(dbtx, tx_hash, delegate, block_height, timestamp).await
-            {
+            if let Err(e) = index_delegate(dbtx, tx_hash, delegate, block_height, timestamp).await {
                 tracing::error!(
                     "failed to index delegate action in tx {}: {}",
                     hex::encode(tx_hash),
@@ -99,14 +98,18 @@ async fn index_delegate(
         .and_then(|idx| idx.as_str())
         .and_then(|s| s.parse::<i64>().ok());
 
-    let (validator_ik, delegation_amount, unbonded_amount, epoch_index) =
-        match (validator_ik, delegation_amount, unbonded_amount, epoch_index) {
-            (Some(ik), Some(da), Some(ua), Some(ei)) => (ik, da, ua, ei),
-            _ => {
-                tracing::debug!("incomplete delegate action data, skipping");
-                return Ok(());
-            }
-        };
+    let (validator_ik, delegation_amount, unbonded_amount, epoch_index) = match (
+        validator_ik,
+        delegation_amount,
+        unbonded_amount,
+        epoch_index,
+    ) {
+        (Some(ik), Some(da), Some(ua), Some(ei)) => (ik, da, ua, ei),
+        _ => {
+            tracing::debug!("incomplete delegate action data, skipping");
+            return Ok(());
+        }
+    };
 
     let validator_address = match identity_key_to_validator_address(validator_ik) {
         Ok(addr) => addr,
