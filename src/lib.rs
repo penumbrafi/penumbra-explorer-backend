@@ -9,7 +9,7 @@ pub use options::ExplorerOptions;
 
 use anyhow::{Context, Result};
 use axum::{
-    http::HeaderName,
+    http::{HeaderName, HeaderValue},
     routing::{get, post},
     Router,
 };
@@ -179,13 +179,32 @@ impl Explorer {
             .await
             .context("Failed to create GraphQL schema and setup database triggers")?;
 
+        // Origins are deployment config: CORS_ORIGINS is a comma-separated list of
+        // exact origins. When unset, the built-in list below applies unchanged.
+        let cors_origins: Vec<HeaderValue> = match env::var("CORS_ORIGINS") {
+            Ok(v) if !v.trim().is_empty() => v
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    s.parse::<HeaderValue>()
+                        .unwrap_or_else(|e| panic!("invalid origin {s:?} in CORS_ORIGINS: {e}"))
+                })
+                .collect(),
+            _ => [
+                "http://localhost:3000",
+                "https://dev.explorer.penumbra.pklabs.me",
+                "https://explorer.penumbra.pklabs.me",
+                "https://explorer.penumbra.zone",
+            ]
+            .iter()
+            .map(|s| s.parse::<HeaderValue>().unwrap())
+            .collect(),
+        };
+        info!("CORS origins: {:?}", cors_origins);
+
         let cors = CorsLayer::new()
-            .allow_origin([
-                "http://localhost:3000".parse().unwrap(),
-                "https://dev.explorer.penumbra.pklabs.me".parse().unwrap(),
-                "https://explorer.penumbra.pklabs.me".parse().unwrap(),
-                "https://explorer.penumbra.zone".parse().unwrap(),
-            ])
+            .allow_origin(cors_origins)
             .allow_methods([
                 axum::http::Method::GET,
                 axum::http::Method::POST,
@@ -216,7 +235,14 @@ impl Explorer {
             .with_state(schema)
             .layer(cors);
 
-        let api_host = "0.0.0.0";
+        // Bind all interfaces, dual-stack (v4-mapped) by default; override with API_BIND,
+        // which accepts `[::]`, `::`, `0.0.0.0` or a plain address.
+        let api_host = env::var("API_BIND").unwrap_or_else(|_| "[::]".to_string());
+        let api_host = if api_host.contains(':') && !api_host.starts_with('[') {
+            format!("[{api_host}]")
+        } else {
+            api_host
+        };
         let api_port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
 
         let addr = format!("{api_host}:{api_port}")
