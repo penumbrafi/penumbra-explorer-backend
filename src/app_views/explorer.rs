@@ -893,15 +893,11 @@ CREATE TABLE IF NOT EXISTS ibc_transfers (
                 COALESCE(us.missed_blocks, 0) as missed_blocks,
                 COALESCE(us.signed_blocks, 0) as signed_blocks,
                 COALESCE(us.total_blocks, 0) as total_tracked_blocks,
-                COALESCE(us.uptime_percentage, 0.00) as uptime_percentage,
-                -- queued_* accumulate pending delegate/undelegate flow between epoch boundaries.
-                COALESCE(svs.queued_delegations, 0) as queued_delegations,
-                COALESCE(svs.queued_undelegations, 0) as queued_undelegations
-            FROM
+                COALESCE(us.uptime_percentage, 0.00) as uptime_percentage
+            FROM 
                 validators v
             LEFT JOIN validator_uptime_stats us ON v.identity_key = us.identity_key
             LEFT JOIN commission_rates cr ON v.identity_key = cr.identity_key
-            LEFT JOIN stake_validator_set svs ON svs.ik = v.identity_key
             ORDER BY 
                 v.voting_power DESC
             ",
