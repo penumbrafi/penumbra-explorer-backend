@@ -1,5 +1,7 @@
 use crate::api::graphql::types::{ValidatorFilter, ValidatorStateFilter};
-use async_graphql::{Enum, Object, SimpleObject};
+use async_graphql::{ComplexObject, Context, Enum, Object, SimpleObject};
+
+use crate::api::graphql::schema::SourcePool;
 use chrono::{DateTime, Utc};
 use sqlx::types::BigDecimal;
 use sqlx::{FromRow, PgPool};
@@ -99,6 +101,7 @@ impl BondingState {
 }
 
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(complex)]
 pub struct Validator {
     pub id: String,
     pub name: Option<String>,
@@ -109,6 +112,49 @@ pub struct Validator {
     pub uptime: Option<f64>,
     pub first_seen_time: Option<DateTime<Utc>>,
     pub commission: f64,
+}
+
+/// Cross-DB fields resolved from pindexer's `stake_validator_set` table via
+/// the SOURCE_DB pool. Kept off the SimpleObject-derived struct because they
+/// don't come from `validator_performance` and need per-request queries.
+#[ComplexObject]
+impl Validator {
+    /// Amount of UM delegated to this validator since the last epoch that
+    /// hasn't yet been applied to `voting_power`. Positive; base-denom.
+    /// Returns 0 when SOURCE_DB is unavailable or the validator has no
+    /// pindexer row (e.g. genesis-only validator without recent events).
+    async fn queued_delegations(&self, ctx: &Context<'_>) -> i64 {
+        queued(ctx, &self.id).await.0
+    }
+
+    /// Amount of UM undelegated since the last epoch that hasn't yet been
+    /// applied to `voting_power`. Positive; base-denom.
+    async fn queued_undelegations(&self, ctx: &Context<'_>) -> i64 {
+        queued(ctx, &self.id).await.1
+    }
+}
+
+/// Fetch the `(queued_delegations, queued_undelegations)` pair for one
+/// identity key. Kept as a plain function (not a dataloader) because the
+/// two ComplexObject resolvers both call it and cargo-graphql already
+/// batches the SELECT via connection pooling — the per-query overhead is
+/// dominated by the pool checkout, not the actual query. If N+1 becomes
+/// a real problem on large `validatorsHomepage` lists we can promote this
+/// to an async-graphql Loader<String>.
+async fn queued(ctx: &Context<'_>, identity_key: &str) -> (i64, i64) {
+    let Some(SourcePool(pool)) = ctx.data_opt::<SourcePool>() else {
+        return (0, 0);
+    };
+    let row: Option<(i64, i64)> = sqlx::query_as(
+        "SELECT queued_delegations, queued_undelegations \
+         FROM stake_validator_set WHERE ik = $1 LIMIT 1",
+    )
+    .bind(identity_key)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    row.unwrap_or((0, 0))
 }
 
 #[derive(Debug, Clone, SimpleObject)]

@@ -25,7 +25,18 @@ pub type PenumbraSchema =
 /// # Errors
 /// Returns an error if database triggers cannot be set up or schema creation fails
 #[allow(clippy::module_name_repetitions)]
-pub async fn create_schema(db_pool: PgPool) -> anyhow::Result<PenumbraSchema> {
+/// Newtype wrapper for the pindexer / SOURCE_DB_URL pool so resolvers can
+/// distinguish it from the primary explorer_backend pool that async-graphql
+/// already exposes as `PgPool`. Used by fields that need to read pindexer
+/// tables (e.g. `stake_validator_set.queued_delegations`), which live in a
+/// different database and cannot be joined into the dest views.
+#[derive(Clone)]
+pub struct SourcePool(pub PgPool);
+
+pub async fn create_schema(
+    db_pool: PgPool,
+    source_pool: Option<PgPool>,
+) -> anyhow::Result<PenumbraSchema> {
     let pubsub = PubSub::new();
 
     // Setup triggers asynchronously - don't block startup if tables don't exist yet
@@ -47,11 +58,16 @@ pub async fn create_schema(db_pool: PgPool) -> anyhow::Result<PenumbraSchema> {
         pubsub_clone.start_subscriptions(&pool_clone);
     });
 
-    let builder =
+    let mut builder =
         AsyncGraphQLSchema::build(QueryRoot, async_graphql::EmptyMutation, SubscriptionRoot)
             .data(ApiContext::new(db_pool.clone()))
             .data(pubsub)
             .data(db_pool);
+    // Only injected when SOURCE_DB_URL is configured; resolvers that need it
+    // (e.g. queued_delegations) handle the absence by returning null / 0.
+    if let Some(sp) = source_pool {
+        builder = builder.data(SourcePool(sp));
+    }
 
     let builder = scalars::register_scalars(builder);
 

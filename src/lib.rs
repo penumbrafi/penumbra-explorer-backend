@@ -19,7 +19,7 @@ use std::env;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tower_http::cors::CorsLayer;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::app_views::explorer::Explorer as ExplorerView;
 
@@ -154,8 +154,28 @@ impl Explorer {
         self.wait_for_essential_tables(&pool).await?;
         info!("Essential tables detected, proceeding with GraphQL setup");
 
+        // Read-only pool to the pindexer database (SOURCE_DB_URL) so GraphQL
+        // resolvers can read per-block fields (e.g. queued_delegations) that
+        // live outside the explorer's dest DB. Kept small — the source pool
+        // is only consulted by a few resolvers and lives at cross-DB latency.
+        // If it can't be opened we log and continue; resolvers gracefully
+        // return null when the pool is absent.
+        let source_pool = match PgPoolOptions::new()
+            .max_connections(5)
+            .min_connections(0)
+            .idle_timeout(Some(Duration::from_secs(60)))
+            .connect(&self.options.source_db_url)
+            .await
+        {
+            Ok(p) => Some(p),
+            Err(e) => {
+                warn!("Source DB pool unavailable, cross-DB resolvers will be null: {e}");
+                None
+            }
+        };
+
         // Now create GraphQL schema with pubsub system
-        let schema = crate::api::graphql::schema::create_schema(pool.clone())
+        let schema = crate::api::graphql::schema::create_schema(pool.clone(), source_pool)
             .await
             .context("Failed to create GraphQL schema and setup database triggers")?;
 
