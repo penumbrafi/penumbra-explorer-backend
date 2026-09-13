@@ -109,6 +109,10 @@ pub struct Validator {
     pub uptime: Option<f64>,
     pub first_seen_time: Option<DateTime<Utc>>,
     pub commission: f64,
+    // queued_* accumulate per-block delegate/undelegate flow and reset at each
+    // epoch boundary when voting_power is applied — surfaces pending in/out.
+    pub queued_delegations: i64,
+    pub queued_undelegations: i64,
 }
 
 #[derive(Debug, Clone, SimpleObject)]
@@ -158,6 +162,8 @@ pub struct ValidatorDetails {
     pub voting_power_active_percentage: f64,
     pub active_since: Option<DateTime<Utc>>,
     pub last_300_blocks: Vec<BlockParticipation>,
+    pub queued_delegations: i64,
+    pub queued_undelegations: i64,
 }
 
 #[derive(Debug, Clone, SimpleObject)]
@@ -251,8 +257,10 @@ impl ValidatorHomepageData {
                 voting_power_active_percentage,
                 uptime_percentage::FLOAT8 as uptime_percentage,
                 first_seen_time,
-                commission_rate::FLOAT8 as commission_rate
-            FROM 
+                commission_rate::FLOAT8 as commission_rate,
+                queued_delegations,
+                queued_undelegations
+            FROM
                 validator_performance
             {where_clause}
             ORDER BY 
@@ -277,6 +285,8 @@ impl ValidatorHomepageData {
                 uptime: row.uptime_percentage,
                 first_seen_time: row.first_seen_time,
                 commission: row.commission_rate,
+                queued_delegations: row.queued_delegations,
+                queued_undelegations: row.queued_undelegations,
             })
             .collect())
     }
@@ -373,6 +383,8 @@ struct ValidatorRow {
     uptime_percentage: Option<f64>,
     first_seen_time: Option<DateTime<Utc>>,
     commission_rate: f64,
+    queued_delegations: i64,
+    queued_undelegations: i64,
 }
 
 #[derive(FromRow)]
@@ -561,8 +573,10 @@ impl ValidatorDetails {
                 vp.commission_rate::FLOAT8 as commission_rate,
                 v.voting_power,
                 v.voting_power_active_percentage,
-                v.first_seen_time
-            FROM 
+                v.first_seen_time,
+                vp.queued_delegations,
+                vp.queued_undelegations
+            FROM
                 validator_performance vp
             JOIN
                 validators v ON v.identity_key = vp.identity_key
@@ -655,6 +669,8 @@ impl ValidatorDetails {
             voting_power_active_percentage: info.voting_power_active_percentage,
             active_since: info.first_seen_time,
             last_300_blocks: last_300_blocks_array,
+            queued_delegations: info.queued_delegations,
+            queued_undelegations: info.queued_undelegations,
         }))
     }
 }
@@ -675,6 +691,8 @@ struct ValidatorDetailsRow {
     voting_power: i64,
     voting_power_active_percentage: f64,
     first_seen_time: Option<DateTime<Utc>>,
+    queued_delegations: i64,
+    queued_undelegations: i64,
 }
 
 #[derive(FromRow)]
